@@ -1,0 +1,650 @@
+<!--	Pacman by Ernest Mężyk -->		
+<html>
+	<head>
+		<title>Pacman</title>
+		<style>canvas { width: 100%; height: 100% }</style>
+	</head>
+	
+	<body>
+		<script src="js/three.js"></script>
+		<script src="js/KeyboardState.js"></script>
+		<script>
+			var scene = new THREE.Scene();
+			var camera = new THREE.PerspectiveCamera( 75, window.innerWidth / window.innerHeight, 0.1, 10000 );
+			var keyboard = new THREEx.KeyboardState();
+			var renderer = new THREE.WebGLRenderer({ antialias: true });
+			renderer.setSize( window.innerWidth, window.innerHeight );
+			document.body.appendChild( renderer.domElement );
+
+			// Zmienne
+			var mapLength = 21;
+			var mapCenter = 11;
+			var cubeSize = 10;
+			var foodSize = 1;
+			var boostSize = 2;
+			var playerSize = 3.5;
+			var enemySize = 4;
+			// 0 - jedzenie
+			// 1 - sciana
+			// 2 - przeciwnik
+			// 3 - postac
+			// 4 - boost
+			// 7 - nic
+			var map = [
+					[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+					[1,0,2,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,2,0,1],
+					[1,0,1,1,0,1,1,1,1,0,1,0,1,1,1,1,0,1,1,0,1],
+					[1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+					[1,4,1,1,0,1,0,1,1,1,1,1,1,1,0,1,0,1,1,4,1],
+					[1,0,0,0,0,1,0,2,0,0,1,0,0,0,0,1,0,0,0,0,1],
+					[1,1,1,1,0,1,1,1,1,0,1,0,1,1,1,1,0,1,1,1,1],
+					[1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1],
+					[1,0,0,0,0,1,0,1,1,1,1,1,1,1,0,1,0,0,0,0,1],
+					[1,0,1,1,0,1,0,1,7,7,7,7,7,1,0,1,0,1,1,0,1],
+					[1,4,0,0,0,0,0,1,7,7,7,7,7,1,0,0,2,0,0,4,1],
+					[1,1,1,1,0,1,0,1,1,1,1,1,1,1,0,1,0,1,1,1,1],
+					[7,7,7,1,0,1,0,0,0,0,0,0,0,0,0,1,0,1,7,7,7],
+					[7,7,7,1,0,1,0,1,1,1,1,1,1,1,0,1,0,1,7,7,7],
+					[1,1,1,1,0,0,0,0,0,0,1,0,0,0,0,0,0,1,1,1,1],
+					[1,0,0,0,0,1,1,1,1,0,1,0,1,1,1,1,0,2,0,0,1],
+					[1,4,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,4,1],
+					[1,0,1,1,0,1,1,1,1,0,1,0,1,1,1,1,0,1,1,0,1],
+					[1,0,1,1,0,1,1,1,1,0,1,0,1,1,1,1,0,1,1,0,1],
+					[1,3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+					[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+			];
+			
+			var wallList = [];
+			var foodList = [];
+			var enemyList = [];
+			var boostList = [];
+			var life = null;
+			var player = null;
+
+			// Losowanie
+			function getRndInteger(min, max)
+			{
+				return Math.floor(Math.random() * (max - min) ) + min;
+			}
+			
+			// Klasy
+			class Health
+			{
+				points = 4;
+				sphere = [];
+				constructor()
+				{
+					this.geometry = new THREE.SphereGeometry( playerSize, 32, 32 );
+					this.material = new THREE.MeshBasicMaterial( {color: 0xffff00} );
+					for(let i = 0; i < 3; i++)
+					{
+						this.sphere[i] = new THREE.Mesh( this.geometry, this.material );
+					}
+				}
+				render()
+				{
+					this.sphere[0].position.set(0,0,cubeSize);
+					this.sphere[1].position.set(cubeSize,0,cubeSize);
+					this.sphere[2].position.set(cubeSize * 2,0,cubeSize);
+				}
+				takeLife()
+				{
+					if(this.points == 4)
+					{
+						this.points = 3;
+						scene.remove(this.sphere[2]);
+					}
+					else if(this.points == 3)
+					{
+						this.points = 2;
+						scene.remove(this.sphere[1]);
+					}
+					else if(this.points == 2)
+					{
+						this.points = 1;
+						scene.remove(this.sphere[0]);
+					}
+					else if(this.points == 1)
+					{
+						this.points = 0;
+					}
+				}
+			}
+			class Enemy
+			{
+				posX = 0;
+				posY = 0;
+				posZ = 0;
+				previousX = 0;
+				previousY = 0;
+				destination = null;
+				isImmune = false;
+				immuneLength = 0;
+				speed = 0.5;
+				constructor()
+				{
+					this.geometry = new THREE.SphereGeometry( enemySize, 32, 32 );
+					this.material = new THREE.MeshBasicMaterial( {color: 0xff0000} );
+					this.sphere = new THREE.Mesh( this.geometry, this.material );
+					
+				}
+				immume()
+				{
+					this.isImmune = true;
+					this.immuneLength = 5 * 60;
+
+				}
+				randDirection()
+				{
+					this.previousDestination = this.destination;
+					while(true)
+					{
+						let valueSet = true;
+						// Losowanie kierunku
+						switch(getRndInteger(0,4))
+						{
+							case 0:
+								this.destination = 'left';
+								this.nextX = this.posX - cubeSize;
+								this.nextY = this.posY;
+								break;
+							case 1:
+								this.destination = 'up';
+								this.nextX = this.posX;
+								this.nextY = this.posY + cubeSize;
+								break;
+							case 2:
+								this.destination = 'right';
+								this.nextX = this.posX + cubeSize;
+								this.nextY = this.posY;
+								break;
+							case 3:
+								this.destination = 'down';
+								this.nextX = this.posX;
+								this.nextY = this.posY - cubeSize;
+								break;
+						}
+						// Sprawdzanie czy kierunek jest pusty
+						if(valueSet && map[- this.nextY / cubeSize][this.nextX / cubeSize] != 1)
+						{
+							valueSet = true;
+						}
+						else valueSet = false;
+
+						switch(this.destination)
+						{
+							case 'left':
+								if(this.previousDestination == 'right') valueSet = false;
+								break;
+							case 'right':
+								if(this.previousDestination == 'left') valueSet = false;
+								break;
+							case 'up':
+								if(this.previousDestination == 'down') valueSet = false;
+							break;
+								case 'down':
+								if(this.previousDestination == 'up') valueSet = false;
+								break;
+						}
+
+						if(valueSet) break;
+					}
+				}
+				move()
+				{
+					// Obliczamy nastepna pozycje
+					switch(this.destination)
+					{
+						case 'left':
+							this.posX -= this.speed;
+							break;
+						case 'right':
+							this.posX += this.speed;
+							break;
+						case 'up':
+							this.posY += this.speed;
+							break;
+						case 'down':
+							this.posY -= this.speed;
+							break;
+					}
+					
+					// Czy przesunal sie o jedna dlugosc sciany
+					if((this.posX != this.previousX || this.posY != this.previousY) && this.posX % cubeSize == 0 && this.posY % cubeSize == 0)
+					{
+						this.previousX = this.posX;
+						this.previousY = this.posY;
+						this.randDirection();
+					}
+				}
+				setPosition(x,y,z)
+				{
+					this.posX = x;
+					this.posY = -y;
+					this.posZ = z;
+					this.previousX = this.posX;
+					this.previousY = this.posY;
+
+					this.randDirection();
+
+				}
+				render()
+				{
+					this.sphere.position.set(this.posX, this.posY, this.posZ);
+
+					if(this.isImmune)
+					{
+						this.sphere.material.color.setHex(0x03fcfc);
+						this.immuneLength -= 1;
+						if(this.immuneLength <= 0) this.isImmune = false;
+					}
+					else
+					{
+						this.sphere.material.color.setHex(0xff0000);
+					}
+				}
+			}
+			class Player
+			{
+				posX = 0;
+				posY = 0;
+				posZ = 0;
+				speed = 1;
+				constructor()
+				{
+					this.geometry = new THREE.SphereGeometry( playerSize, 32, 32 );
+					this.material = new THREE.MeshBasicMaterial( {color: 0xffff00} );
+					this.sphere = new THREE.Mesh( this.geometry, this.material );
+				}
+				setPosition(x,y,z)
+				{
+					this.posX = x;
+					this.posY = -y;
+					this.posZ = z;
+				}
+				render()
+				{
+					this.sphere.position.set(this.posX, this.posY, this.posZ);
+				}
+				move(x,y)
+				{
+					this.newX = this.posX + x;
+					this.newY = this.posY - y;
+
+					// Sprawdzanie czy mozna sie przesunac
+					let possibleToMove = true;
+					for(let i = 0; i < wallList.length; i++)
+					{
+						if(Math.abs(wallList[i].posX - this.newX) < cubeSize - 1 && Math.abs(wallList[i].posY - this.newY) < cubeSize - 1)
+						{
+							possibleToMove = false;
+						}
+					}
+
+					// ...
+					if(possibleToMove)
+					{
+						this.posX = this.newX;
+						this.posY = this.newY;
+					}
+					
+
+				}
+			}
+			class Boost
+			{
+				posX = 0;
+				posY = 0;
+				posZ = 0;
+				constructor()
+				{
+					this.geometry = new THREE.SphereGeometry( boostSize, 32, 32 );
+					this.material = new THREE.MeshBasicMaterial( {color: 0xffffff} );
+					this.sphere = new THREE.Mesh( this.geometry, this.material );
+				}
+				setPosition(x,y,z)
+				{
+					this.posX = x;
+					this.posY = -y;
+					this.posZ = z;
+				}
+				render()
+				{
+					this.sphere.position.set(this.posX, this.posY, this.posZ);
+				}
+			}
+			class Food
+			{
+				posX = 0;
+				posY = 0;
+				posZ = 0;
+				constructor()
+				{
+					this.geometry = new THREE.SphereGeometry( foodSize, 32, 32 );
+					this.material = new THREE.MeshBasicMaterial( {color: 0xffffff} );
+					this.sphere = new THREE.Mesh( this.geometry, this.material );
+				}
+				setPosition(x,y,z)
+				{
+					this.posX = x;
+					this.posY = -y;
+					this.posZ = z;
+				}
+				render()
+				{
+					this.sphere.position.set(this.posX, this.posY, this.posZ);
+				}
+			}
+			class Wall
+			{
+				posX = 0;
+				posY = 0;
+				posZ = 0;
+				constructor()
+				{
+					this.geometry = new THREE.BoxGeometry(cubeSize, cubeSize, cubeSize);
+					this.material = new THREE.MeshBasicMaterial({color: 0x0000cc});
+					this.cube = new THREE.Mesh(this.geometry, this.material);
+				}
+				setPosition(x,y,z)
+				{
+					this.posX = x;
+					this.posY = -y;
+					this.posZ = z;
+				}
+				render()
+				{
+					this.cube.position.set(this.posX, this.posY, this.posZ);
+				}
+			}
+			// Funkcje
+			function loadWalls()
+			{
+				wallList = [];
+
+				for(let y = 0; y < mapLength; y++)
+				{
+					for(let x = 0; x < mapLength; x++)
+					{
+						if(map[y][x] == 1)
+						{
+							wallList.push(new Wall());
+							wallList[wallList.length - 1].setPosition(x * cubeSize, y * cubeSize, 0);
+						}
+					}
+				}
+
+				for(let i = 0; i < wallList.length; i++)
+				{
+					scene.add(wallList[i].cube);
+				}
+			}
+
+			function loadFood()
+			{
+				foodList = [];
+
+				for(let y = 0; y < mapLength; y++)
+				{
+					for(let x = 0; x < mapLength; x++)
+					{
+						if(map[y][x] == 0 || map[y][x] == 2)
+						{
+							foodList.push(new Food());
+							foodList[foodList.length - 1].setPosition(x * cubeSize, y * cubeSize, 0);
+						}
+					}
+				}
+
+				for(let i = 0; i < foodList.length; i++)
+				{
+					scene.add(foodList[i].sphere);
+				}
+			}
+
+			function loadBoost()
+			{
+				boostList = [];
+
+				for(let y = 0; y < mapLength; y++)
+				{
+					for(let x = 0; x < mapLength; x++)
+					{
+						if(map[y][x] == 4)
+						{
+							boostList.push(new Boost());
+							boostList[boostList.length - 1].setPosition(x * cubeSize, y * cubeSize, 0);
+						}
+					}
+				}
+
+				for(let i = 0; i < boostList.length; i++)
+				{
+					scene.add(boostList[i].sphere);
+				}
+			}
+
+			function loadPlayer()
+			{
+				player = null;
+
+				for(let y = 0; y < mapLength; y++)
+				{
+					for(let x = 0; x < mapLength; x++)
+					{
+						if(map[y][x] == 3)
+						{
+							player = new Player();
+							player.setPosition(x * cubeSize, y * cubeSize, 0);
+						}
+					}
+				}
+
+				scene.add(player.sphere);
+			}
+
+			function loadEnemy()
+			{
+				enemyList = [];
+
+				for(let y = 0; y < mapLength; y++)
+				{
+					for(let x = 0; x < mapLength; x++)
+					{
+						if(map[y][x] == 2)
+						{
+							enemyList.push(new Enemy());
+							enemyList[enemyList.length - 1].setPosition(x * cubeSize, y * cubeSize, 0);
+						}
+					}
+				}
+
+				for(let i = 0; i < enemyList.length; i++)
+				{
+					scene.add(enemyList[i].sphere);
+				}
+			}
+			function loadLife()
+			{
+				life = null;
+				life = new Health();
+				scene.add(life.sphere[0]);
+				scene.add(life.sphere[1]);
+				scene.add(life.sphere[2]);
+			}
+
+			function renderLife()
+			{
+				life.render();
+			}
+
+			function renderWalls()
+			{
+				for(let i = 0; i < wallList.length; i++)
+				{
+					wallList[i].render();
+				}
+			}
+			function renderFood()
+			{
+				for(let i = 0; i < foodList.length; i++)
+				{
+					foodList[i].render();
+				}
+			}
+			function renderBoost()
+			{
+				for(let i = 0; i < boostList.length; i++)
+				{
+					boostList[i].render();
+				}
+			}
+			function renderPlayer()
+			{
+				player.render();
+			}
+			function renderEnemy()
+			{
+				for(let i = 0; i < enemyList.length; i++)
+				{
+					enemyList[i].render();
+				}
+			}
+			function moveEnemy()
+			{
+				for(let i = 0; i < enemyList.length; i++)
+				{
+					enemyList[i].move();
+				}
+			}
+			function eating()
+			{
+				for(let i = 0; i < foodList.length; i++)
+				{
+					if(Math.abs(foodList[i].posX - player.posX) < playerSize && Math.abs(foodList[i].posY - player.posY) < playerSize)
+					{
+						scene.remove(foodList[i].sphere);
+						foodList.splice(i, 1);
+						i--;
+					}
+				}
+			}
+			function eatingBoost()
+			{
+				for(let i = 0; i < boostList.length; i++)
+				{
+					if(Math.abs(boostList[i].posX - player.posX) < playerSize && Math.abs(boostList[i].posY - player.posY) < playerSize)
+					{
+						scene.remove(boostList[i].sphere);
+						boostList.splice(i, 1);
+						i--;
+
+						for(let j = 0; j < enemyList.length; j++)
+						{
+							enemyList[j].immume();
+						}
+
+					}
+				}
+			}
+			function death()
+			{
+				for(let i = 0; i < enemyList.length; i++)
+				{
+					if(enemyList[i].isImmune == false && Math.abs(enemyList[i].posX - player.posX) < playerSize && Math.abs(enemyList[i].posY - player.posY) < playerSize)
+					{
+						scene.remove(player.sphere);
+						loadPlayer();
+						life.takeLife();
+					}
+				}
+			}
+			function keyEvents(event)
+			{
+				if (keyboard.pressed("W")) 
+				{
+					player.move(0, - player.speed);
+				}
+				if (keyboard.pressed("S"))
+				{
+					player.move(0, player.speed);
+				}
+				if (keyboard.pressed("A"))
+				{
+					player.move(- player.speed, 0);
+				}
+				if (keyboard.pressed("D"))
+				{
+					player.move(player.speed, 0);
+				}
+			}
+			// Zmienne gry
+			var gameLoaded = false;
+			var g = new THREE.BoxGeometry(0, 0, 0);
+			var m = new THREE.MeshBasicMaterial({color: 0x0000cc});
+			var lookAtObject = new THREE.Mesh(g, m);
+			scene.add(lookAtObject);
+			
+			// Glowna petla programu
+			function render()
+			{
+				requestAnimationFrame(render);
+				if(!gameLoaded)
+				{
+					gameLoaded = true;
+					loadWalls();
+					loadFood();
+					loadBoost();
+					loadPlayer();
+					loadEnemy();
+					loadLife();
+				}
+				
+
+				moveEnemy();
+				keyEvents();
+
+				renderWalls();
+				renderFood();
+				renderBoost();
+				renderPlayer();
+				renderEnemy();
+				renderLife();
+
+				eating();
+				eatingBoost();
+				death();
+				
+				
+				camera.position.set(mapCenter * cubeSize, - mapCenter * cubeSize, 160);
+				lookAtObject.position.set(mapCenter * cubeSize,- mapCenter * cubeSize,0);
+				camera.lookAt(lookAtObject.position);
+
+				renderer.render(scene, camera);
+
+				if(foodList.length == 0)
+				{
+					alert("Wygrałeś");
+					while(scene.children.length > 0)
+					{ 
+   						scene.remove(scene.children[0]); 
+					}
+					gameLoaded = false;
+				}
+				if(life.points <= 0)
+				{
+					alert("Przegrałeś");
+					while(scene.children.length > 0)
+					{ 
+   						scene.remove(scene.children[0]); 
+					}
+					gameLoaded = false;
+				}
+
+			}
+			render();
+					
+		</script>
+	</body>
+	
+</html>
